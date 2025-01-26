@@ -19,7 +19,7 @@
 #define min(x,y) x > y ? y : x
 #endif
 
-static const char version_string[] = "1.0.1";
+static const char version_string[] = "1.0.2";
 
 static struct option long_opts[] = {
 	{ "name", required_argument, 0, 'n' },
@@ -167,8 +167,8 @@ int parse_args(struct config* cfg, int argc, char** argv) {
 			c++;
 			optind++;
 		}
-		cfg -> argv[c] = NULL;
 
+		cfg -> argv[c] = NULL;
 		cfg -> op = CNTR;
 	}
 

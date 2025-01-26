@@ -20,6 +20,7 @@ struct config {
 	char* long_name;
 	enum OPERATION op;
 	bool forward_pgroup;
+	char* cwd;
 	char* pidfile;
 	char* cpidfile;
 	int kill_sig;
@@ -35,6 +36,7 @@ struct config {
 	.long_name = NULL, \
 	.op = INFRA, \
 	.forward_pgroup = false, \
+	.cwd = NULL, \
 	.pidfile = NULL, \
 	.cpidfile = NULL, \
 	.kill_sig = -1, \
@@ -43,6 +45,7 @@ struct config {
 	.child_pid = -1 \
 }
 
+void get_cwd(struct config* cfg);
 void write_pidfile(struct config* cfg);
 void write_cpidfile(struct config* cfg);
 void prepare_config(struct config* cfg, int argc, char** argv);

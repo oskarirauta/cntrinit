@@ -3,10 +3,20 @@
 #include <string.h>
 #include <sys/prctl.h>
 #include <unistd.h>
+#include <linux/limits.h>
 
 #include "logging.h"
 #include "util.h"
 #include "config.h"
+
+void get_cwd(struct config* cfg) {
+
+	char cwd[PATH_MAX];
+	if ( getcwd(cwd, sizeof(cwd)) != NULL ) {
+		cfg -> cwd = strdup(cwd);
+		DEBUG("current working directory is %s", cfg -> cwd);
+	} else WARN("getcwd failed, %s", strerror(errno));
+}
 
 void write_pidfile(struct config* cfg) {
 
@@ -76,6 +86,7 @@ void prepare_config(struct config* cfg, int argc, char** argv) {
 			WARN("Failed to set parent death signal to %s", sig_to_string(cfg -> kill_sig));
 		else DEBUG("Parent death signal set to %s", sig_to_string(cfg -> kill_sig));
 	}
+
 }
 
 void free_config(struct config* cfg) {
@@ -88,6 +99,9 @@ void free_config(struct config* cfg) {
 
 	if ( cfg -> long_name )
 		free(cfg -> long_name);
+
+	if ( cfg -> cwd )
+		free(cfg -> cwd);
 
 	if ( cfg -> pidfile )
 		free(cfg -> pidfile);

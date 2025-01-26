@@ -3,6 +3,13 @@
 #include <signal.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <stdlib.h>
+#include <sys/syscall.h>
+#include <sched.h>
+#include <linux/limits.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <libgen.h>
 
 #include "config.h"
 #include "logging.h"
@@ -10,15 +17,69 @@
 
 extern char **environ;
 
+static void clean_cmd_path(struct config* cfg) {
+
+	if ( cfg -> argv[0] == NULL || strlen(cfg -> argv[0]) == 0 )
+		return;
+
+	char *path_dir = strdup(cfg -> argv[0]);
+	char *path_exe = strdup(cfg -> argv[0]);
+	char *dir = dirname(path_dir);
+	char *exe = basename(path_exe);
+	char new_path[PATH_MAX];
+
+	if ( dir != NULL && exe != NULL && strlen(dir) > 0 && strlen(exe) > 0 ) {
+
+		if ( dir[strlen(dir) - 1] != '/' && exe[strlen(exe) - 1] != '/' )
+			sprintf(new_path, "%s/%s", dir, exe);
+		else sprintf(new_path, "%s%s", dir, exe);
+
+		free(cfg -> argv[0]);
+		cfg -> argv[0] = strdup(new_path);
+	}
+
+	if ( realpath(cfg -> argv[0], new_path) != NULL ) {
+
+		free(cfg -> argv[0]);
+		cfg -> argv[0] = strdup(new_path);
+
+	} else WARN("realpath failed, %s", strerror(errno));
+
+	if ( path_dir )
+		free(path_dir);
+	if ( path_exe )
+		free(path_exe);
+}
+
 int start_child(struct config* cfg) {
 
 	if ( chdir("/") == -1 )
 		WARN("chdir failed, %s", strerror(errno));
 
-	if ( cfg -> argc == 0 )
+	if ( cfg -> op != CNTR )
 		return 0;
 
-	pid_t child = fork();
+	struct stat st;
+	if ( !(stat(cfg -> argv[0], &st) == 0 && st.st_mode & S_IXUSR )) {
+
+		char new_path[PATH_MAX];
+
+		if ( cfg -> argv[0][0] == '/' )
+			sprintf(new_path, "%s", cfg -> argv[0]);
+		else sprintf(new_path, "%s/%s", cfg -> cwd, cfg -> argv[0]);
+
+		if ( stat(new_path, &st) == 0 && st.st_mode & S_IXUSR ) {
+
+			free(cfg -> argv[0]);
+			cfg -> argv[0] = strdup(new_path);
+			clean_cmd_path(cfg);
+			DEBUG("child command fixed to %s", cfg -> argv[0]);
+
+		} else WARN("command %s not found or not executable, child process will fail", cfg -> argv[0]);
+
+	} else clean_cmd_path(cfg);
+
+	pid_t child = syscall(__NR_clone, 0 | SIGCHLD, 0, 0, 0, 0);
 
 	if ( child < 0 )
 		FAIL2("failed to fork: %s", strerror(errno))

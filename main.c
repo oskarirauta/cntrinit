@@ -22,6 +22,7 @@ int main(int argc, char** argv) {
 
 	DEBUG("PID %d", getpid());
 	DEBUG("running in %s mode", cfg.op == INFRA ? "infra" : "container");
+	get_cwd(&cfg);
 
 	i = setup_signal_handler(&cfg);
 	if ( i != 0 ) {
