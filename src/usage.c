@@ -19,7 +19,7 @@
 #define min(x,y) x > y ? y : x
 #endif
 
-static const char version_string[] = "1.0.0";
+static const char version_string[] = "1.0.1";
 
 static struct option long_opts[] = {
 	{ "name", required_argument, 0, 'n' },

@@ -1,5 +1,5 @@
 name: New release
-run-name: ${{ github.actor }} is creating a new release ${{ inputs.tagname }}
+run-name: ${{ github.actor }} is creating a new release version ${{ inputs.tagname }}
 
 on:
   workflow_dispatch:

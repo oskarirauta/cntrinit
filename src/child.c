@@ -1,7 +1,8 @@
+#define _GNU_SOURCE
 #include <stdio.h>
-#include <unistd.h>
 #include <signal.h>
 #include <fcntl.h>
+#include <unistd.h>
 
 #include "config.h"
 #include "logging.h"
@@ -11,7 +12,8 @@ extern char **environ;
 
 int start_child(struct config* cfg) {
 
-	chdir("/");
+	if ( chdir("/") == -1 )
+		WARN("chdir failed, %s", strerror(errno));
 
 	if ( cfg -> argc == 0 )
 		return 0;

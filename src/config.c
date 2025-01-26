@@ -65,7 +65,7 @@ void prepare_config(struct config* cfg, int argc, char** argv) {
 				argv[i][i2] = 0;
 		}
 
-		if ( sprintf(argv[0], cfg -> long_name) != strlen(cfg -> long_name))
+		if ( sprintf(argv[0], "%s", cfg -> long_name) != strlen(cfg -> long_name))
 			DEBUG("Failed to set process long name to %s", cfg -> long_name);
 		else DEBUG("Process long name set to %s", cfg -> long_name);
 	}
