@@ -19,7 +19,7 @@
 #define min(x,y) ((x) > (y) ? (y) : (x))
 #endif
 
-static const char version_string[] = "1.1.0";
+static const char version_string[] = "1.2.0";
 
 static struct option long_opts[] = {
 	{ "name", required_argument, 0, 'n' },
@@ -33,7 +33,10 @@ static struct option long_opts[] = {
 	{ NULL, 0, NULL, 0 }
 };
 
-static const char* short_opts = "n:k:gp:c:hvd";
+// leading '+': stop option scanning at the first non-option, so tokens after the
+// command (`cntrinit /bin/sh -d`) go to the child instead of being permuted and
+// parsed as our own flags. The documented `-- cmd args` path is unaffected.
+static const char* short_opts = "+n:k:gp:c:hvd";
 
 static void version() {
 
@@ -67,7 +70,7 @@ int parse_args(struct config* cfg, int argc, char** argv) {
 	char* name = NULL;
 	bool skip_args = argc > 1 ? true : false;
 
-	cfg -> cmd = xstrdup(argv[0]);
+	cfg -> cmd = xstrdup(( argc > 0 && argv[0] ) ? argv[0] : "cntrinit"); // argc==0 => argv[0]==NULL
 	opterr = 0;
 
 	while ( true ) {

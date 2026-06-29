@@ -11,6 +11,12 @@ STATIC_LDFLAGS ?= -static -no-pie -Wl,-z,relro -Wl,-z,now
 INCLUDES += -I./include
 DEPFLAGS := -MMD -MP
 
+# Expose the GNU/BSD libc symbols we use (execvpe, strdup, getcwd, signalfd)
+# regardless of any -std override (e.g. from the OpenWrt buildroot): a strict
+# -std defines __STRICT_ANSI__, which hides them on musl. `override` keeps this
+# even when CFLAGS is set on the make command line.
+override CFLAGS += -D_GNU_SOURCE
+
 PREFIX ?= /usr/local
 DESTDIR ?=
 

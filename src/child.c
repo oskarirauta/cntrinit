@@ -1,4 +1,3 @@
-#define _GNU_SOURCE
 #include <stdio.h>
 #include <signal.h>
 #include <fcntl.h>
@@ -47,13 +46,15 @@ int start_child(struct config* cfg) {
 		if ( setpgid(child, child) < 0 && errno != EACCES && errno != ESRCH )
 			DEBUG("setpgid for child %d failed, %s", child, strerror(errno));
 
+		DEBUG("child process started with PID %d", child);
+
+		// write the child pidfile before chdir("/") so a relative -c path resolves
+		// against the startup cwd, consistent with -p (write_pidfile, main.c)
+		write_cpidfile(cfg);
+
 		// don't keep the container's working directory pinned in the init itself
 		if ( chdir("/") == -1 )
 			DEBUG("chdir failed, %s", strerror(errno));
-
-		DEBUG("child process started with PID %d", child);
-
-		write_cpidfile(cfg);
 
 		return child;
 	}
