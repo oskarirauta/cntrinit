@@ -1,11 +1,20 @@
 all: world
 
-CC?=gcc
-CFLAGS?=-Wall -fPIC -O2
-STATIC_LDFLAGS?=-Wl,-z -Wl,now -Wl,-z -Wl,relro -fuse-ld=bfd -znow -zrelro -static
-INCLUDES+= -I./include
+CC ?= cc
+CFLAGS ?= -std=gnu11 -Os -Wall -Wextra
+LDFLAGS ?=
 
-OBJS:= \
+# Fully static, position-dependent binary with no runtime dependencies.
+# Override STATIC_LDFLAGS if you need e.g. static-pie instead.
+STATIC_LDFLAGS ?= -static -no-pie -Wl,-z,relro -Wl,-z,now
+
+INCLUDES += -I./include
+DEPFLAGS := -MMD -MP
+
+PREFIX ?= /usr/local
+DESTDIR ?=
+
+OBJS := \
 	objs/util.o \
 	objs/config.o \
 	objs/usage.o \
@@ -19,33 +28,27 @@ world: cntrinit
 
 $(shell mkdir -p objs)
 
-objs/util.o: src/util.c
-	$(CC) $(CFLAGS) $(INCLUDES) -c -o $@ $<;
-
-objs/config.o: src/config.c
-	$(CC) $(CFLAGS) $(INCLUDES) -c -o $@ $<;
-
-objs/usage.o: src/usage.c
-	$(CC) $(CFLAGS) $(INCLUDES) -c -o $@ $<;
-
-objs/logging.o: src/logging.c
-	$(CC) $(CFLAGS) $(INCLUDES) -c -o $@ $<;
-
-objs/handler.o: src/handler.c
-	$(CC) $(CFLAGS) $(INCLUDES) -c -o $@ $<;
-
-objs/reaper.o: src/reaper.c
-	$(CC) $(CFLAGS) $(INCLUDES) -c -o $@ $<;
-
-objs/child.o: src/child.c
-	$(CC) $(CFLAGS) $(INCLUDES) -c -o $@ $<;
+objs/%.o: src/%.c
+	$(CC) $(CFLAGS) $(DEPFLAGS) $(INCLUDES) -c -o $@ $<
 
 objs/main.o: main.c
-	$(CC) $(CFLAGS) $(INCLUDES) -c -o $@ $<;
+	$(CC) $(CFLAGS) $(DEPFLAGS) $(INCLUDES) -c -o $@ $<
 
 cntrinit: $(OBJS)
 	$(CC) $(CFLAGS) $(STATIC_LDFLAGS) $^ -o $@ $(LDFLAGS)
 
+-include $(OBJS:.o=.d)
+
+.PHONY: install
+install: cntrinit
+	install -D -m 0755 cntrinit $(DESTDIR)$(PREFIX)/bin/cntrinit
+
+.PHONY: strip
+strip: cntrinit
+	strip --strip-all cntrinit
+
 .PHONY: clean
 clean:
 	@rm -rf objs cntrinit
+
+.PHONY: all world

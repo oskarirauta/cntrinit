@@ -30,7 +30,7 @@ int main(int argc, char** argv) {
 		DIE("exiting");
 	}
 
-	if ( setup_child_reaper < 0 ) {
+	if ( setup_child_reaper() < 0 ) {
 		free_config(&cfg);
 		DIE("exiting");
 	}
@@ -46,7 +46,7 @@ int main(int argc, char** argv) {
 	i = handle_signals(&cfg);
 	if ( i < 0 ) {
 		free_config(&cfg);
-		DIE("exiting")
+		DIE("exiting");
 	}
 
 	free_config(&cfg);

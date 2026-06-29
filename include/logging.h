@@ -20,8 +20,8 @@ void _log(enum LOG_LEVEL level, char* fmt, ...);
 #define WARN(...) _log(LOG_WARN, __VA_ARGS__)
 #define ERR(...) _log(LOG_ERR, __VA_ARGS__)
 #define DEBUG(...) _log(LOG_DEBUG, __VA_ARGS__)
-#define FAIL(...) { _log(LOG_ERR, __VA_ARGS__); return 1; }
-#define FAIL2(...) { _log(LOG_ERR, __VA_ARGS__); return -1; }
-#define DIE(...) { _log(LOG_FATAL, __VA_ARGS__); exit(1); }
+#define FAIL(...) do { _log(LOG_ERR, __VA_ARGS__); return 1; } while (0)
+#define FAIL2(...) do { _log(LOG_ERR, __VA_ARGS__); return -1; } while (0)
+#define DIE(...) do { _log(LOG_FATAL, __VA_ARGS__); exit(1); } while (0)
 
 #endif

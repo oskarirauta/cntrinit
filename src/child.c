@@ -3,13 +3,8 @@
 #include <signal.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <stdlib.h>
-#include <sys/syscall.h>
-#include <sched.h>
-#include <linux/limits.h>
 #include <sys/types.h>
-#include <sys/stat.h>
-#include <libgen.h>
+#include <sys/prctl.h>
 
 #include "config.h"
 #include "logging.h"
@@ -17,78 +12,45 @@
 
 extern char **environ;
 
-static void clean_cmd_path(struct config* cfg) {
-
-	if ( cfg -> argv[0] == NULL || strlen(cfg -> argv[0]) == 0 )
-		return;
-
-	char *path_dir = strdup(cfg -> argv[0]);
-	char *path_exe = strdup(cfg -> argv[0]);
-	char *dir = dirname(path_dir);
-	char *exe = basename(path_exe);
-	char new_path[PATH_MAX];
-
-	if ( dir != NULL && exe != NULL && strlen(dir) > 0 && strlen(exe) > 0 ) {
-
-		if ( dir[strlen(dir) - 1] != '/' && exe[strlen(exe) - 1] != '/' )
-			sprintf(new_path, "%s/%s", dir, exe);
-		else sprintf(new_path, "%s%s", dir, exe);
-
-		free(cfg -> argv[0]);
-		cfg -> argv[0] = strdup(new_path);
-	}
-
-	if ( realpath(cfg -> argv[0], new_path) != NULL ) {
-
-		free(cfg -> argv[0]);
-		cfg -> argv[0] = strdup(new_path);
-
-	} else WARN("realpath failed, %s", strerror(errno));
-
-	if ( path_dir )
-		free(path_dir);
-	if ( path_exe )
-		free(path_exe);
-}
-
 int start_child(struct config* cfg) {
 
-	if ( chdir("/") == -1 )
-		WARN("chdir failed, %s", strerror(errno));
+	if ( cfg -> op != CNTR ) {
 
-	if ( cfg -> op != CNTR )
+		// infra mode: no child to run, just don't keep the startup directory pinned
+		if ( chdir("/") == -1 )
+			WARN("chdir failed, %s", strerror(errno));
+
 		return 0;
+	}
 
-	struct stat st;
-	if ( !(stat(cfg -> argv[0], &st) == 0 && st.st_mode & S_IXUSR )) {
+	pid_t self = getpid(); // init's own pid, used by the child to detect our death
 
-		char new_path[PATH_MAX];
+	// flush buffered diagnostics so the forked child does not inherit and
+	// re-emit them when stdout is not a terminal (and thus fully buffered)
+	fflush(NULL);
 
-		if ( cfg -> argv[0][0] == '/' )
-			sprintf(new_path, "%s", cfg -> argv[0]);
-		else sprintf(new_path, "%s/%s", cfg -> cwd, cfg -> argv[0]);
-
-		if ( stat(new_path, &st) == 0 && st.st_mode & S_IXUSR ) {
-
-			free(cfg -> argv[0]);
-			cfg -> argv[0] = strdup(new_path);
-			clean_cmd_path(cfg);
-			DEBUG("child command fixed to %s", cfg -> argv[0]);
-
-		} else WARN("command %s not found or not executable, child process will fail", cfg -> argv[0]);
-
-	} else clean_cmd_path(cfg);
-
-	pid_t child = syscall(__NR_clone, 0 | SIGCHLD, 0, 0, 0, 0);
+	pid_t child = fork();
 
 	if ( child < 0 )
-		FAIL2("failed to fork: %s", strerror(errno))
-	else if ( child > 0 ) {
+		FAIL2("failed to fork, %s", strerror(errno));
 
-		if ( kill(child, 0) < 0 )
-			FAIL2("failed to start %s [%d]", cfg -> argv[0], child);
+	if ( child > 0 ) { // parent
 
 		cfg -> child_pid = child;
+
+		/*
+		 * Put the child in its own process group from the parent side too.
+		 * The child does the same, but doing it here as well closes the race
+		 * window so that signal forwarding to the group (-g) is reliable.
+		 * EACCES means the child already exec'd, ESRCH that it already exited.
+		 */
+		if ( setpgid(child, child) < 0 && errno != EACCES && errno != ESRCH )
+			DEBUG("setpgid for child %d failed, %s", child, strerror(errno));
+
+		// don't keep the container's working directory pinned in the init itself
+		if ( chdir("/") == -1 )
+			DEBUG("chdir failed, %s", strerror(errno));
+
 		DEBUG("child process started with PID %d", child);
 
 		write_cpidfile(cfg);
@@ -96,46 +58,59 @@ int start_child(struct config* cfg) {
 		return child;
 	}
 
-	if ( setpgid(0, 0) <  0 )
-		FAIL2("setpgid failed, %s", strerror(errno));
+	/*
+	 * Child. The working directory is left as the runtime set it (so WORKDIR
+	 * is honoured) and the command is resolved by execvpe(): a name without a
+	 * slash is looked up in PATH, otherwise it is taken as a literal path.
+	 * We deliberately do not canonicalise it with realpath() so that
+	 * multi-call binaries (busybox, coreutils, ...) still see the name they
+	 * were invoked as in argv[0].
+	 */
+
+	if ( setpgid(0, 0) < 0 ) {
+		ERR("setpgid failed, %s", strerror(errno));
+		_exit(127);
+	}
 
 	pid_t pgid = getpgrp();
-	if ( pgid < 0 )
-		FAIL2("getpgrp failed, %s", strerror(errno));
+	if ( pgid < 0 ) {
+		ERR("getpgrp failed, %s", strerror(errno));
+		_exit(127);
+	}
 
-	if ( sigaddset(&cfg -> signal.child, SIGTSTP) < 0 )
-		FAIL2("sigaddset SIGTSTP failed, %s", strerror(errno));
-
-	if ( sigaddset(&cfg -> signal.child, SIGTTOU) < 0 )
-		FAIL2("sigaddset SIGTTOU failed, %s", strerror(errno));
-
-	if ( sigaddset(&cfg -> signal.child, SIGTTIN) < 0 )
-		FAIL2("sigaddset SIGTTIN failed, %s", strerror(errno));
-
+	/*
+	 * All signals are still blocked here (inherited from the init's signalfd
+	 * setup), so tcsetpgrp() cannot stop us with SIGTTOU while we grab the
+	 * controlling terminal.
+	 */
 	int ttyfd = open("/dev/tty", O_RDWR | O_CLOEXEC);
 	if ( ttyfd < 0 )
-		WARN("non-fatal, could not open /dev/tty, %s", strerror(errno));
+		DEBUG("non-fatal, could not open /dev/tty, %s", strerror(errno));
 
 	if ( tcsetpgrp(ttyfd < 0 ? STDIN_FILENO : ttyfd, pgid) < 0 ) {
 
 		if ( errno == ENOTTY || errno == EBADF )
 			DEBUG("no tty present, %s", strerror(errno));
 		else if ( errno == ENXIO )
-			DEBUG("start_child failure, device not available: %s", strerror(errno));
+			DEBUG("controlling terminal not available, %s", strerror(errno));
 		else {
 
 			if ( ttyfd >= 0 )
 				close(ttyfd);
 
-			FAIL2("start_child failed, %s", strerror(errno));
+			ERR("tcsetpgrp failed, %s", strerror(errno));
+			_exit(127);
 		}
 	}
 
 	if ( ttyfd >= 0 )
 		close(ttyfd);
 
-	if ( sigprocmask(SIG_SETMASK, &cfg -> signal.child, NULL) < 0 )
-		FAIL2("sigprocmask failed: %s", strerror(errno));
+	// restore the signal mask the init originally inherited so the child starts clean
+	if ( sigprocmask(SIG_SETMASK, &cfg -> signal.child, NULL) < 0 ) {
+		ERR("sigprocmask failed, %s", strerror(errno));
+		_exit(127);
+	}
 
 	if ( debugging ) {
 
@@ -149,10 +124,27 @@ int start_child(struct config* cfg) {
 		}
 
 		fprintf(stdout, "\n");
+		fflush(stdout);
 	}
 
-	if ( execvpe(cfg -> argv[0], cfg -> argv, environ) == -1 )
-		FAIL2("failed to execute %s", cfg -> argv[0]);
+	/*
+	 * Arrange for the child to be signalled when the init dies (-k). This must
+	 * be done here, in the child after fork(): PR_SET_PDEATHSIG is per-process
+	 * and is cleared by fork(), but it survives execve(). It is set just before
+	 * exec to keep the window small, and getppid() is checked afterwards to
+	 * cover the race where the init already died during that window.
+	 */
+	if ( cfg -> kill_sig >= 0 ) {
 
-	return 0; // not reached due to execvpe..
+		if ( prctl(PR_SET_PDEATHSIG, cfg -> kill_sig) != 0 )
+			WARN("failed to set parent death signal %d, %s", cfg -> kill_sig, strerror(errno));
+		else if ( getppid() != self )
+			raise(cfg -> kill_sig); // init already gone, honour -k now
+	}
+
+	execvpe(cfg -> argv[0], cfg -> argv, environ);
+
+	// only reached if execvpe failed
+	ERR("failed to execute %s, %s", cfg -> argv[0], strerror(errno));
+	_exit(127);
 }

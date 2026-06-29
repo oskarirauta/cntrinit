@@ -12,14 +12,14 @@
 #include "usage.h"
 
 #ifndef max
-#define max(x,y) x < y ? y : x
+#define max(x,y) ((x) < (y) ? (y) : (x))
 #endif
 
 #ifndef min
-#define min(x,y) x > y ? y : x
+#define min(x,y) ((x) > (y) ? (y) : (x))
 #endif
 
-static const char version_string[] = "1.0.2";
+static const char version_string[] = "1.1.0";
 
 static struct option long_opts[] = {
 	{ "name", required_argument, 0, 'n' },
@@ -67,7 +67,7 @@ int parse_args(struct config* cfg, int argc, char** argv) {
 	char* name = NULL;
 	bool skip_args = argc > 1 ? true : false;
 
-	cfg -> cmd = strdup(argv[0]);
+	cfg -> cmd = xstrdup(argv[0]);
 	opterr = 0;
 
 	while ( true ) {
@@ -80,38 +80,39 @@ int parse_args(struct config* cfg, int argc, char** argv) {
 
 		switch ( c ) {
 			case 'n':
-				if ( name != NULL )
-					free(name);
+				free(name); // free(NULL) is a no-op
+				name = NULL;
 
-				if ( strcmp(optarg, ""))
-					name = strdup(optarg);
+				if ( optarg[0] != '\0' )
+					name = xstrdup(optarg);
 
 				break;
-			case 'k':
+			case 'k': {
 				int kill_sig = sig_to_int(optarg);
 				if ( kill_sig == -1 ) {
 
 					printf("unknown kill signal %s\n", optarg);
 					printf("list of supported signals (remember to use uppercase characters):\n");
 					print_supported_signal_names();
+
+					if ( name != NULL )
+						free(name);
+
 					return -1;
 
 				} else cfg -> kill_sig = kill_sig;
 				break;
-			case 'f':
+			}
+			case 'g':
 				cfg -> forward_pgroup = true;
 				break;
 			case 'p':
-				if ( cfg -> pidfile )
-					free(cfg -> pidfile);
-
-				cfg -> pidfile = strdup(optarg);
+				free(cfg -> pidfile);
+				cfg -> pidfile = xstrdup(optarg);
 				break;
 			case 'c':
-				if ( cfg -> cpidfile )
-					free(cfg -> cpidfile);
-
-				cfg -> cpidfile = strdup(optarg);
+				free(cfg -> cpidfile);
+				cfg -> cpidfile = xstrdup(optarg);
 				break;
 			case 'h':
 				cfg -> op = USAGE;
@@ -126,10 +127,11 @@ int parse_args(struct config* cfg, int argc, char** argv) {
 
 				if ( optopt == 'n' || optopt == 'k' || optopt == 'p' || optopt == 'c' )
 					ERR("option -%c needs argument", optopt);
-				else WARN("unknown option %c", c);
+				else if ( optopt )
+					ERR("unknown option -%c", optopt);
+				else ERR("unknown option");
 
-				if ( name != NULL )
-					free(name);
+				free(name);
 
 				return -1;
 		}
@@ -155,15 +157,15 @@ int parse_args(struct config* cfg, int argc, char** argv) {
 	if ( optind < argc ) {
 
 		c = 0;
-		sz = (sizeof(char*) * ( argc - optind + 1)) + 1;
+		sz = sizeof(char*) * ( argc - optind + 1); // +1 for NULL terminator
 
 		cfg -> op = CNTR;
 		cfg -> argc = argc - optind;
-		cfg -> argv = malloc(sz);
+		cfg -> argv = xmalloc(sz);
 		memset(cfg -> argv, 0, sz);
 
 		while ( optind < argc ) {
-			cfg -> argv[c] = strdup(argv[optind]);
+			cfg -> argv[c] = xstrdup(argv[optind]);
 			c++;
 			optind++;
 		}
@@ -174,21 +176,20 @@ int parse_args(struct config* cfg, int argc, char** argv) {
 
 	if ( name != NULL ) {
 
-		sz = min(13, strlen(name));
-		cfg -> short_name = malloc(sz + 3);
+		sz = min((size_t)13, strlen(name));
+		cfg -> short_name = xmalloc(sz + 3);
 		memset(cfg -> short_name, 0, sz + 3);
 		memcpy(cfg -> short_name + 1, name, sz);
 		cfg -> short_name[0] = '[';
 		cfg -> short_name[sz + 1] = ']';
 
 		sz = 4 + strlen(name) + ( cfg -> op == INFRA ? 5 : 4 );
-		cfg -> long_name = malloc(sz + 1);
-		memset(cfg -> long_name, 0, sz);
-		sprintf(cfg -> long_name, "[%s: %s]", cfg -> op == INFRA ? "infra" : "cntr", name);
-		cfg -> long_name[sz] = 0;
+		cfg -> long_name = xmalloc(sz + 1);
+		memset(cfg -> long_name, 0, sz + 1);
+		snprintf(cfg -> long_name, sz + 1, "[%s: %s]", cfg -> op == INFRA ? "infra" : "cntr", name);
 
 		free(name);
-        }
+	}
 
 	return 0;
 }

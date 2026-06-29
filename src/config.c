@@ -13,7 +13,7 @@ void get_cwd(struct config* cfg) {
 
 	char cwd[PATH_MAX];
 	if ( getcwd(cwd, sizeof(cwd)) != NULL ) {
-		cfg -> cwd = strdup(cwd);
+		cfg -> cwd = xstrdup(cwd);
 		DEBUG("current working directory is %s", cfg -> cwd);
 	} else WARN("getcwd failed, %s", strerror(errno));
 }
@@ -63,30 +63,32 @@ void prepare_config(struct config* cfg, int argc, char** argv) {
 		else DEBUG("Process short name set to %s", cfg -> short_name);
 	}
 
-	if ( cfg -> long_name ) {
+	if ( cfg -> long_name && argc > 0 ) {
 
-		int i, i2, sz;
+		/*
+		 * argv strings are laid out contiguously in memory, so the writable
+		 * region for the process title spans from argv[0] up to the end of
+		 * the last argument. Bound the write to that region to avoid
+		 * clobbering adjacent memory (e.g. the environment).
+		 */
+		char* start = argv[0];
+		char* end = argv[argc - 1] + strlen(argv[argc - 1]) + 1;
+		size_t avail = (size_t)(end - start);
 
-		for ( i = 0; i < argc; i++ ) {
+		memset(start, 0, avail);
 
-			sz = strlen(argv[i]);
-
-			for ( i2 = 0; i2 < sz; i2++ )
-				argv[i][i2] = 0;
-		}
-
-		if ( sprintf(argv[0], "%s", cfg -> long_name) != strlen(cfg -> long_name))
-			DEBUG("Failed to set process long name to %s", cfg -> long_name);
-		else DEBUG("Process long name set to %s", cfg -> long_name);
+		int w = snprintf(start, avail, "%s", cfg -> long_name);
+		if ( w < 0 || (size_t)w >= avail )
+			DEBUG("process long name truncated to fit argv (%zu bytes available)", avail);
+		else DEBUG("process long name set to %s", cfg -> long_name);
 	}
 
-	if ( cfg -> kill_sig >= 0 ) {
-
-		if ( prctl(PR_SET_PDEATHSIG, cfg -> kill_sig) != 0 )
-			WARN("Failed to set parent death signal to %s", sig_to_string(cfg -> kill_sig));
-		else DEBUG("Parent death signal set to %s", sig_to_string(cfg -> kill_sig));
-	}
-
+	/*
+	 * Note: the parent-death signal (-k) is NOT set here. PR_SET_PDEATHSIG
+	 * applies to the calling process and is cleared across fork(), so it must
+	 * be set by the child after fork() (see start_child()) for it to take
+	 * effect for the child process.
+	 */
 }
 
 void free_config(struct config* cfg) {

@@ -1,7 +1,9 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <signal.h>
 
+#include "logging.h"
 #include "util.h"
 
 struct entry {
@@ -65,10 +67,10 @@ const char* sig_to_string(int sig) {
 		i++;
 	}
 
-	return NULL;
+	return "UNKNOWN";
 }
 
-void print_supported_signal_names() {
+void print_supported_signal_names(void) {
 
 	int i = 0;
 	while ( signals[i].name != NULL ) {
@@ -76,4 +78,22 @@ void print_supported_signal_names() {
 		i++;
 	}
 	printf("\n");
+}
+
+void* xmalloc(size_t size) {
+
+	void* p = malloc(size);
+	if ( p == NULL )
+		DIE("out of memory");
+
+	return p;
+}
+
+char* xstrdup(const char* s) {
+
+	char* p = strdup(s);
+	if ( p == NULL )
+		DIE("out of memory");
+
+	return p;
 }
